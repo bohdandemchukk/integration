@@ -8,11 +8,13 @@ def create_order(
     db: Session,
     data: schemas.OrderCreate,
     price: float | None,
+    status="pending"
 ) -> models.Order:
     """Create a new order and persist it to the database."""
     order = models.Order(
         **data.model_dump(),
         predicted_price=price,
+        prediction_status=status
     )
 
     db.add(order)
@@ -42,21 +44,20 @@ def list_orders(
         )
     )
 
-
-def update_order(
-    db: Session,
+def update_order(db: Session,
     order: models.Order,
-    data: schemas.OrderUpdate,
-) -> models.Order:
-    """Update the provided fields of an existing order."""
-    for key, value in data.model_dump(exclude_unset=True).items():
-        setattr(order, key, value)
+    data: schemas.OrderUpdate, reprice=False, price=None, status=None) -> models.Order:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(order, field, value)
+
+    if reprice:
+        # price=None при збої: старий прогноз стосувався старих параметрів
+        order.predicted_price = price
+        order.prediction_status = status
 
     db.commit()
     db.refresh(order)
-
     return order
-
 
 def delete_order(db: Session, order: models.Order) -> None:
     """Delete an existing order from the database."""

@@ -95,3 +95,5 @@ def predict(req: PredictRequest):
         model_version=MODEL_VERSION,
         latency_ms=latency_ms,
     )
+
+

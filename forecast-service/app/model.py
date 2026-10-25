@@ -44,15 +44,18 @@ CSV_COLUMNS = {
 def load_training_data() -> pd.DataFrame:
     """Load and normalize the Ames Housing training dataset.
 
-    The source CSV uses column names with spaces, while the application
-    uses normalized column names without spaces.
+    The source CSV may use column names with or without spaces,
+    depending on which variant of the dataset is provided. Both are
+    normalized to the space-free names used internally by the model.
     """
     df = pd.read_csv(DATA_PATH)
 
-    # Remove accidental whitespace around column names.
-    df.columns = df.columns.str.strip()
+    # Remove all whitespace from column names, so both
+    # "Gr Liv Area" and "GrLivArea" normalize to "GrLivArea".
+    df.columns = df.columns.str.replace(" ", "", regex=False).str.strip()
 
-    missing_columns = set(CSV_COLUMNS) - set(df.columns)
+    columns = NUM + CAT + [TARGET]
+    missing_columns = set(columns) - set(df.columns)
 
     if missing_columns:
         raise ValueError(
@@ -60,19 +63,19 @@ def load_training_data() -> pd.DataFrame:
             f"{sorted(missing_columns)}"
         )
 
-    df = df.rename(columns=CSV_COLUMNS)
-
-    columns = NUM + CAT + [TARGET]
-
     return df[columns].dropna(subset=[TARGET])
 
 
-def train_model() -> Pipeline:
-    """Build and train the Ridge regression pipeline.
+def build_pipeline() -> Pipeline:
+    """Build an UNFITTED Ridge regression pipeline.
 
     Numerical features are imputed using the median and standardized.
     Categorical features are imputed using the most frequent value and
     one-hot encoded, with unknown categories ignored during inference.
+
+    All preprocessing lives inside the pipeline, so during train/test
+    split and cross-validation the imputers, scaler and encoder are fitted
+    only on the training part (no data leakage).
     """
     preprocessor = ColumnTransformer(
         [
@@ -80,14 +83,8 @@ def train_model() -> Pipeline:
                 "num",
                 Pipeline(
                     [
-                        (
-                            "imputer",
-                            SimpleImputer(strategy="median"),
-                        ),
-                        (
-                            "scaler",
-                            StandardScaler(),
-                        ),
+                        ("imputer", SimpleImputer(strategy="median")),
+                        ("scaler", StandardScaler()),
                     ]
                 ),
                 NUM,
@@ -98,15 +95,11 @@ def train_model() -> Pipeline:
                     [
                         (
                             "imputer",
-                            SimpleImputer(
-                                strategy="most_frequent"
-                            ),
+                            SimpleImputer(strategy="most_frequent"),
                         ),
                         (
                             "onehot",
-                            OneHotEncoder(
-                                handle_unknown="ignore"
-                            ),
+                            OneHotEncoder(handle_unknown="ignore"),
                         ),
                     ]
                 ),
@@ -115,18 +108,22 @@ def train_model() -> Pipeline:
         ]
     )
 
-    pipe = Pipeline(
+    return Pipeline(
         [
             ("preprocess", preprocessor),
             ("regressor", Ridge(alpha=1.0)),
         ]
     )
 
+
+def train_model() -> Pipeline:
+    """Build the pipeline and fit it on ALL data.
+
+    Used by the dev-only fallback in main.py and for the final artifact.
+    """
     df = load_training_data()
 
-    pipe.fit(
-        df[NUM + CAT],
-        df[TARGET],
-    )
+    pipe = build_pipeline()
+    pipe.fit(df[NUM + CAT], df[TARGET])
 
     return pipe
